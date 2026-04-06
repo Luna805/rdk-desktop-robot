@@ -1,9 +1,12 @@
 #include "include/display_service.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 
 #include "driver/gpio.h"
 #include "driver/i2c.h"
+#include "driver/uart.h"
+#include "driver/usb_serial_jtag.h"
 #include "esp_check.h"
 #include "esp_lcd_panel_io.h"
 #include "esp_lcd_panel_ops.h"
@@ -28,6 +31,7 @@ static const char *TAG = "display_service";
 #define DISPLAY_I2C_SCL                 GPIO_NUM_9
 #define DISPLAY_I2C_FREQ_HZ             400000
 #define DISPLAY_I2C_TIMEOUT_MS          1000
+#define DISPLAY_HOST_UART_PORT          UART_NUM_0
 #define DISPLAY_IO_EXPANDER_ADDR        0x24
 #define DISPLAY_BACKLIGHT_ADDR          0x38
 #define DISPLAY_BACKLIGHT_ENABLE_REG    0x01
@@ -277,6 +281,7 @@ static void display_service_style_rect(lv_obj_t *obj,
                                        lv_coord_t radius,
                                        lv_color_t color,
                                        lv_opa_t opa);
+static void display_service_send_host_event(const char *event_name);
 static lv_obj_t *display_service_create_pixel_block(lv_obj_t *parent,
                                                     int16_t cell_x,
                                                     int16_t cell_y,
@@ -618,6 +623,23 @@ static int32_t display_service_ease_in_out_1000(int32_t progress_1000)
     int64_t t2 = t * t;
     int64_t t3 = t2 * t;
     return (int32_t)(((3LL * t2 * 1000LL) - (2LL * t3)) / 1000000LL);
+}
+
+static void display_service_send_host_event(const char *event_name)
+{
+    if ((event_name == NULL) || (event_name[0] == '\0')) {
+        return;
+    }
+
+    char line[64];
+    int written = snprintf(line, sizeof(line), "EVT:%s\n", event_name);
+    if (written <= 0) {
+        return;
+    }
+
+    size_t len = (size_t)((written < (int)sizeof(line)) ? written : ((int)sizeof(line) - 1));
+    (void)usb_serial_jtag_write_bytes(line, len, 0);
+    (void)uart_write_bytes(DISPLAY_HOST_UART_PORT, line, len);
 }
 
 static bool display_service_is_landing_sequence_active_locked(int64_t now)
@@ -1432,6 +1454,12 @@ static void display_service_update_touch_locked(void)
             display_service_schedule_gaze_locked(now);
             display_service_schedule_blink_locked(now);
             display_service_apply_touch_zone_locked(zone, now);
+
+            if (zone == DISPLAY_TOUCH_ZONE_TOP_MID) {
+                display_service_send_host_event("TOUCH_SHY");
+            } else if (zone == DISPLAY_TOUCH_ZONE_MID_MID) {
+                display_service_send_host_event("TOUCH_CENTER");
+            }
         }
 
         if (!s_long_press_triggered &&

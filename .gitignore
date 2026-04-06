@@ -1,0 +1,9 @@
+.DS_Store
+.cache/
+build/
+managed_components/
+sdkconfig.old
+dependencies.lock.old
+.vscode/
+ESP32-S3-Touch-LCD-4.3B-BOX-Demo/
+ESP32-S3-Touch-LCD-4in3B_Drawing/

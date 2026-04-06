@@ -1,64 +1,127 @@
-# emoji_on_esp32s3_touch_lcd_4.3B
+# rdk-desktop-robot
 
-`v1.0.2` 是一个基于 ESP32-S3 4.3 寸触摸屏的机器人表情显示原型，聚焦“表情状态切换 + 触摸交互 + 真实状态接入”的最小可用版本。
+基于微雪 `ESP32-S3-Touch-LCD-4.3B` 的桌面机器人屏幕固件。
 
-## 产品功能
+这个仓库当前聚焦屏幕端能力：
 
-- 基于 LVGL 的机器人表情显示界面
-- 支持 `booting`、`idle`、`listening`、`processing`、`speaking`、`happy`、`sleep`、`error` 等基础状态
-- 支持 9 宫格触摸交互，不同区域触发不同视觉反馈
-- 支持左右看、害羞、说话、睡眠、兴奋等表情切换
-- 支持更自然的 gaze 与 blink 动画，左右看与眨眼过渡更加平滑
-- 支持通过 USB Serial JTAG 接入真实 `robot_link` 状态源
+- 机器人表情显示
+- 9 宫格触摸交互
+- 通过串口接收外部状态
+- 红外触发 `landing` 时播放旧版 `momo` 像素小人降落动画
 
-## 版本详情
+配套的 `RDK X5` 侧脚本可以负责：
 
-### v1.0.2
+- 红外 `DO` 检测
+- USB 摄像头人脸跟踪
+- 舵机控制
+- 通过 `Type-C` 串口给屏幕发 `landing / sleep / listening ...`
 
-发布日期：2026-04-05
+## 当前功能
 
-本版本聚焦左右看视觉重构与版本可回退性说明：
+- 支持状态：
+  `booting`、`idle`、`listening`、`landing`、`processing`、`speaking`、`happy`、`sleep`、`error`
+- 支持触摸表情：
+  左看、右看、害羞、说话、睡眠、兴奋、眨眼、处理中、监听中
+- 支持空闲 gaze / blink 自动行为
+- 支持 `UART0` 和 `USB Serial JTAG` 两路接收状态命令
+- 支持红外唤醒时的小人降落动画
 
-- 去掉用于左右看表现的白色高光点与叠加遮罩对象
-- 不再依赖伪发光叠层来模拟视线，而改为让眼睛、嘴和腮红随表情整体横向偏移
-- 将脸部相关对象挂到统一父容器上整体移动，减少多对象分别改坐标带来的抖动与重影
-- 将左右看偏移改为固定步进，避免长尾插值导致的拖尾感和卡顿感
-- 在后续微调中继续细调 `DISPLAY_FACE_SHIFT_PX` 与 `DISPLAY_FACE_SHIFT_STEP_PX`，兼顾左右看幅度与平滑稳定性
-- 保留现有 `look left / look right / blink` 自动行为与 9 宫格触摸映射
-- 将工程版本号更新为 `v1.0.2`，用于与 `v1.0.1` 明确区分
-- 补充版本说明与回退策略，确保后续发布 `v1.0.2` 时不会覆盖已有 `v1.0.1`
+## 联动架构
 
-### v1.0.1
+典型联动链路如下：
 
-发布日期：2026-04-05
+```text
+TCRT5000 DO
+  -> RDK X5 GPIO
+  -> ir_wake_bridge.py
+  -> /dev/ttyACM*
+  -> robot_link
+  -> emotion_engine
+  -> display_service
+  -> 屏幕动画/表情
+```
 
-本版本为稳定性与观感优化补丁版本：
+摄像头链路与红外链路是并行的：
 
-- 修复 LVGL 高开销阴影绘制导致的 `task_wdt` 卡死问题
-- 将动态对象的阴影改为更轻量的伪发光描边，保留层次感同时降低重绘负担
-- 减少底部状态文字的重复刷新，避免无意义重绘
-- 明确 GT911 使用板级 reset 预选 `0x5D` 地址，消除误导性的 I2C 地址初始化警告
+```text
+USB Camera
+  -> face_tracker.py
+  -> 舵机 PWM
+```
 
-### v1.0.0
+两条链路本身没有直接代码耦合，联合调试时主要关注：
 
-发布日期：2026-04-05
+- USB 串口是否稳定
+- 摄像头读帧是否稳定
+- RDK X5 供电与 USB Hub 是否有干扰
 
-本版本完成了项目第一阶段可运行闭环：
+## 仓库结构
 
-- 打通 `robot_link -> emotion_engine -> display_service` 状态链路
-- 完成触摸驱动接入与 9 区域交互映射
-- 完成基础表情渲染与自动行为调度
-- 优化左右看动画，减少瞬时跳变
-- 加入眨眼功能，并增强 look/blink 的自然感
-- 参考 `emoji/5.html` 持续对齐眼睛比例、视线偏移和整体观感
+- `components/display/`
+  屏幕、动画、触摸、`momo` 降落逻辑
+- `components/emotion/`
+  轻量状态机
+- `components/robot_link/`
+  串口状态输入
+- `main/`
+  主循环入口
+- `emoji/`
+  表情设计参考
+- `docs/JOINT_DEBUG.md`
+  摄像头 + 红外 + 屏幕联调步骤
 
-## 状态输入示例
+## 构建与烧录
 
-设备运行后，可通过 USB Serial JTAG 发送一行文本切换状态：
+```bash
+cd /path/to/rdk-desktop-robot
+source ~/esp/esp-idf-v5.5.2/export.sh
+idf.py build
+idf.py -p /dev/cu.usbmodemXXXX flash
+```
+
+进入串口监视：
+
+```bash
+idf.py -p /dev/cu.usbmodemXXXX monitor
+```
+
+退出：
+
+```text
+Ctrl+]
+```
+
+## 屏幕端快速自测
+
+烧录完成后，不接 RDK，也可以直接从上位机串口给屏幕发命令：
+
+```python
+import serial, time
+
+ser = serial.Serial('/dev/cu.usbmodemXXXX', 115200, timeout=1)
+time.sleep(2)
+ser.write(b'landing\n')
+ser.flush()
+time.sleep(4)
+ser.write(b'sleep\n')
+ser.flush()
+ser.close()
+```
+
+预期：
+
+- `landing`：出现 `momo` 像素小人降落
+- `sleep`：退出该场景
+
+## 支持的状态命令
+
+可直接发送：
 
 ```text
 idle
 listening
+landing
+wake
 processing
 speaking
 happy
@@ -66,28 +129,33 @@ sleep
 error
 ```
 
-也兼容如下格式：
+其中：
 
-```text
-state=speaking
-{"state":"processing"}
-```
+- `landing / wake / trigger`
+  会统一映射到 `ROBOT_STATE_LANDING`
+- `landing`
+  用于红外唤醒时的小人降落动画
 
-## 目录说明
+## 与 RDK X5 联调
 
-- `components/display/`：显示、动画、触摸交互
-- `components/emotion/`：情绪状态机
-- `components/robot_link/`：外部状态输入接入
-- `main/`：主程序入口
-- `emoji/`：表情视觉参考稿
+完整联调步骤见：
 
-## 当前定位
+[JOINT_DEBUG.md](/Users/yirran/Downloads/rdx_camera_红外版/emoji_on_esp32s3_touch_lcd_4.3B-main/docs/JOINT_DEBUG.md)
 
-`v1.0.2` 为在 `v1.0.1` 基础上继续打磨左右看视觉表达的可演示版本。当前方向是减少“附加特效感”，让表情切换更直接、更自然，同时保留 `v1.0.0` 与 `v1.0.1` 已建立的稳定性基础。
+内容包括：
 
-## 版本与回退策略
+- 红外单测
+- 摄像头单测
+- 屏幕串口单测
+- 三者同时运行
+- `ttyACM*` 变化和 USB 掉线排查
 
-- `v1.0.2` 不应覆盖 `v1.0.1`：正确做法是新增一次提交，并单独创建 `v1.0.2` 标签
-- 只要保留 `v1.0.1` 的提交或标签，后续即使 `v1.0.2` 效果不满意，也可以随时回到 `v1.0.1`
-- 推荐发布顺序：先提交 `v1.0.2` 代码，再打 `v1.0.2` 标签，再推送到远端
-- 如果验证失败，可直接检出 `v1.0.1` 标签，或基于 `v1.0.1` 新开修复分支继续调整
+## 备注
+
+- 本仓库当前主要保存 ESP 屏幕端固件
+- `RDK X5` 侧脚本如 `ir_wake_bridge.py`、`face_tracker.py` 可以放在独立目录，例如 `~/face_tracker`
+- 如果你把整套桌面机器人方案继续拆仓库，推荐后续把：
+  - `screen firmware`
+  - `rdk supervisor`
+  - `camera/servo scripts`
+  分开管理

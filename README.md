@@ -1,15 +1,20 @@
 # rdk-desktop-robot
 
-基于微雪 `ESP32-S3-Touch-LCD-4.3B` 的桌面机器人屏幕固件。
+基于微雪 `ESP32-S3-Touch-LCD-4.3B` 和 `RDK X5` 的桌面机器人项目。
 
-这个仓库当前聚焦屏幕端能力：
+这个仓库现在同时包含两部分：
+
+- ESP 屏幕固件
+- RDK 侧脚本
+
+其中屏幕端能力包括：
 
 - 机器人表情显示
 - 9 宫格触摸交互
 - 通过串口接收外部状态
 - 红外触发 `landing` 时播放旧版 `momo` 像素小人降落动画
 
-配套的 `RDK X5` 侧脚本可以负责：
+仓库内置的 `RDK X5` 侧脚本负责：
 
 - 红外 `DO` 检测
 - USB 摄像头人脸跟踪
@@ -65,6 +70,8 @@ USB Camera
   串口状态输入
 - `main/`
   主循环入口
+- `rdk/`
+  RDK X5 侧脚本、配置和 service 安装脚本
 - `emoji/`
   表情设计参考
 - `docs/JOINT_DEBUG.md`
@@ -136,6 +143,27 @@ error
 - `landing`
   用于红外唤醒时的小人降落动画
 
+## RDK 侧脚本
+
+RDK 侧脚本已经整理在：
+
+[rdk/](/Users/yirran/Downloads/rdx_camera_红外版/emoji_on_esp32s3_touch_lcd_4.3B-main/rdk)
+
+包括：
+
+- `face_tracker.py`
+- `camera.py`
+- `servo_control.py`
+- `ir_wake_bridge.py`
+- `tracker_config.json`
+- `ir_wake_config.json`
+- `install_service.sh`
+- `install_ir_wake_service.sh`
+
+部署说明见：
+
+[rdk/README.md](/Users/yirran/Downloads/rdx_camera_红外版/emoji_on_esp32s3_touch_lcd_4.3B-main/rdk/README.md)
+
 ## 与 RDK X5 联调
 
 完整联调步骤见：
@@ -152,10 +180,6 @@ error
 
 ## 备注
 
-- 本仓库当前主要保存 ESP 屏幕端固件
-- `RDK X5` 侧脚本如 `ir_wake_bridge.py`、`face_tracker.py` 可以放在独立目录，例如 `~/face_tracker`
-- 如果你把整套桌面机器人方案继续拆仓库，推荐后续把：
-  - `screen firmware`
-  - `rdk supervisor`
-  - `camera/servo scripts`
-  分开管理
+- 仓库现在已经同时包含 ESP 固件和 RDK 侧脚本
+- 如果你要在板子上运行，推荐把 `rdk/` 整个目录复制到 `~/face_tracker`
+- 如果后续项目继续变大，仍然可以再拆成多个仓库

@@ -1,0 +1,21 @@
+{
+  "pin": 33,
+  "camera_id": 0,
+  "frame_width": 640,
+  "frame_height": 480,
+  "stop_us": 1500,
+  "left_us": 1570,
+  "right_us": 1430,
+  "pulse_time": 0.08,
+  "pulse_cooldown": 0.25,
+  "dead_zone": 0.12,
+  "move_zone": 0.2,
+  "lost_timeout": 1.5,
+  "center_bias": 0.08,
+  "estimated_deg_per_pulse": 6.0,
+  "max_rotation_deg": 360.0,
+  "confirm_frames": 2,
+  "show_preview": false,
+  "save_preview_path": "",
+  "save_preview_every": 0.5
+}

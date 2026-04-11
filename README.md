@@ -74,6 +74,10 @@ USB Camera
   RDK X5 侧脚本、配置和 service 安装脚本
 - `emoji/`
   表情设计参考
+- `docs/HANDOFF.md`
+  新工程师交接阅读入口
+- `docs/ARCHITECTURE.md`
+  整体系统架构说明
 - `docs/JOINT_DEBUG.md`
   摄像头 + 红外 + 屏幕联调步骤
 
@@ -164,7 +168,22 @@ RDK 侧脚本已经整理在：
 
 [rdk/README.md](/Users/yirran/Downloads/rdx_camera_红外版/emoji_on_esp32s3_touch_lcd_4.3B-main/rdk/README.md)
 
+## 新工程师交接入口
+
+如果这个项目后续要交给其他工程师，建议先读：
+
+1. [HANDOFF.md](/Users/yirran/Downloads/rdx_camera_红外版/emoji_on_esp32s3_touch_lcd_4.3B-main/docs/HANDOFF.md)
+2. [ARCHITECTURE.md](/Users/yirran/Downloads/rdx_camera_红外版/emoji_on_esp32s3_touch_lcd_4.3B-main/docs/ARCHITECTURE.md)
+3. [rdk/README.md](/Users/yirran/Downloads/rdx_camera_红外版/emoji_on_esp32s3_touch_lcd_4.3B-main/rdk/README.md)
+4. [JOINT_DEBUG.md](/Users/yirran/Downloads/rdx_camera_红外版/emoji_on_esp32s3_touch_lcd_4.3B-main/docs/JOINT_DEBUG.md)
+
+`SESSION_HANDOFF.md` 保留历史开发过程，建议放在后面按需查阅。
+
 ## 与 RDK X5 联调
+
+整体架构说明见：
+
+[ARCHITECTURE.md](/Users/yirran/Downloads/rdx_camera_红外版/emoji_on_esp32s3_touch_lcd_4.3B-main/docs/ARCHITECTURE.md)
 
 完整联调步骤见：
 

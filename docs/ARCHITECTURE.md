@@ -305,8 +305,8 @@ EVT:TOUCH_CENTER
 
 如果你是第一次接手这个项目，建议按这个顺序看：
 
-1. [README.md](/Users/yirran/Downloads/rdx_camera_红外版/emoji_on_esp32s3_touch_lcd_4.3B-main/README.md)
-2. [JOINT_DEBUG.md](/Users/yirran/Downloads/rdx_camera_红外版/emoji_on_esp32s3_touch_lcd_4.3B-main/docs/JOINT_DEBUG.md)
+1. [README.md](../README.md)
+2. [JOINT_DEBUG.md](JOINT_DEBUG.md)
 3. `main/app_main.c`
 4. `components/robot_link/robot_link.c`
 5. `components/emotion/emotion_engine.c`

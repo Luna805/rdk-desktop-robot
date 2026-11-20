@@ -10,13 +10,13 @@
 
 推荐阅读顺序：
 
-1. [README.md](/Users/yirran/Downloads/rdx_camera_红外版/emoji_on_esp32s3_touch_lcd_4.3B-main/README.md)
+1. [README.md](../README.md)
    先理解仓库里到底包含什么
-2. [ARCHITECTURE.md](/Users/yirran/Downloads/rdx_camera_红外版/emoji_on_esp32s3_touch_lcd_4.3B-main/docs/ARCHITECTURE.md)
+2. [ARCHITECTURE.md](ARCHITECTURE.md)
    再看整体系统和信号流
-3. [rdk/README.md](/Users/yirran/Downloads/rdx_camera_红外版/emoji_on_esp32s3_touch_lcd_4.3B-main/rdk/README.md)
+3. [rdk/README.md](../rdk/README.md)
    了解 RDK 侧脚本如何部署和运行
-4. [JOINT_DEBUG.md](/Users/yirran/Downloads/rdx_camera_红外版/emoji_on_esp32s3_touch_lcd_4.3B-main/docs/JOINT_DEBUG.md)
+4. [JOINT_DEBUG.md](JOINT_DEBUG.md)
    需要联调时按这个步骤走
 5. `main/app_main.c`
    看主循环
@@ -35,7 +35,7 @@
 
 不建议一开始就读：
 
-- [SESSION_HANDOFF.md](/Users/yirran/Downloads/rdx_camera_红外版/emoji_on_esp32s3_touch_lcd_4.3B-main/SESSION_HANDOFF.md)
+- [SESSION_HANDOFF.md](../SESSION_HANDOFF.md)
   这是历史开发记录，信息很多，但不适合当第一入口
 - `components/esp32_display_panel/`
   这是大体量依赖和示例目录，不是当前业务主逻辑
@@ -186,7 +186,7 @@ RDK 侧现在是同一个 `ir_wake_bridge.py` 进程同时负责：
 
 联调步骤已经写在：
 
-[JOINT_DEBUG.md](/Users/yirran/Downloads/rdx_camera_红外版/emoji_on_esp32s3_touch_lcd_4.3B-main/docs/JOINT_DEBUG.md)
+[JOINT_DEBUG.md](JOINT_DEBUG.md)
 
 ## 10. 这份文档与 SESSION_HANDOFF 的关系
 

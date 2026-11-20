@@ -77,8 +77,19 @@ sudo python3 ir_wake_bridge.py --serial-port /dev/ttyACM0
 - 如果屏幕串口经常从 `/dev/ttyACM0` 变成 `/dev/ttyACM1`，先用 `ls /dev/ttyACM*` 确认实际设备号
 - 如果有 `USB disconnect`、`error -71`、`disabled by hub (EMI?)`，优先排查 USB 线、Hub 和供电
 
+## 单元测试
+
+不依赖硬件,在电脑或 RDK 上都能跑:
+
+```bash
+cd rdk
+python3 -m unittest discover -s tests -v
+```
+
+覆盖:人脸偏移的滞回判断、红外去抖、触摸舵机低头/抬头状态、串口断线重连与状态补发。
+
 ## 进一步联调
 
 完整联调步骤见：
 
-[../docs/JOINT_DEBUG.md](/Users/yirran/Downloads/rdx_camera_红外版/emoji_on_esp32s3_touch_lcd_4.3B-main/docs/JOINT_DEBUG.md)
+[../docs/JOINT_DEBUG.md](../docs/JOINT_DEBUG.md)

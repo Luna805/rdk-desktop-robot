@@ -151,7 +151,7 @@ error
 
 RDK 侧脚本已经整理在：
 
-[rdk/](/Users/yirran/Downloads/rdx_camera_红外版/emoji_on_esp32s3_touch_lcd_4.3B-main/rdk)
+[rdk/](rdk)
 
 包括：
 
@@ -166,28 +166,34 @@ RDK 侧脚本已经整理在：
 
 部署说明见：
 
-[rdk/README.md](/Users/yirran/Downloads/rdx_camera_红外版/emoji_on_esp32s3_touch_lcd_4.3B-main/rdk/README.md)
+[rdk/README.md](rdk/README.md)
 
 ## 新工程师交接入口
 
 如果这个项目后续要交给其他工程师，建议先读：
 
-1. [HANDOFF.md](/Users/yirran/Downloads/rdx_camera_红外版/emoji_on_esp32s3_touch_lcd_4.3B-main/docs/HANDOFF.md)
-2. [ARCHITECTURE.md](/Users/yirran/Downloads/rdx_camera_红外版/emoji_on_esp32s3_touch_lcd_4.3B-main/docs/ARCHITECTURE.md)
-3. [rdk/README.md](/Users/yirran/Downloads/rdx_camera_红外版/emoji_on_esp32s3_touch_lcd_4.3B-main/rdk/README.md)
-4. [JOINT_DEBUG.md](/Users/yirran/Downloads/rdx_camera_红外版/emoji_on_esp32s3_touch_lcd_4.3B-main/docs/JOINT_DEBUG.md)
+1. [HANDOFF.md](docs/HANDOFF.md)
+2. [ARCHITECTURE.md](docs/ARCHITECTURE.md)
+3. [rdk/README.md](rdk/README.md)
+4. [JOINT_DEBUG.md](docs/JOINT_DEBUG.md)
 
 `SESSION_HANDOFF.md` 保留历史开发过程，建议放在后面按需查阅。
+
+## 版本与迭代
+
+- 各版本改动和前后对比数据：[CHANGELOG.md](CHANGELOG.md)
+- 版本对比测试流程：[BENCHMARK.md](docs/BENCHMARK.md)
+- RDK 侧单元测试：`cd rdk && python3 -m unittest discover -s tests -v`
 
 ## 与 RDK X5 联调
 
 整体架构说明见：
 
-[ARCHITECTURE.md](/Users/yirran/Downloads/rdx_camera_红外版/emoji_on_esp32s3_touch_lcd_4.3B-main/docs/ARCHITECTURE.md)
+[ARCHITECTURE.md](docs/ARCHITECTURE.md)
 
 完整联调步骤见：
 
-[JOINT_DEBUG.md](/Users/yirran/Downloads/rdx_camera_红外版/emoji_on_esp32s3_touch_lcd_4.3B-main/docs/JOINT_DEBUG.md)
+[JOINT_DEBUG.md](docs/JOINT_DEBUG.md)
 
 内容包括：
 

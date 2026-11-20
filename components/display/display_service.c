@@ -32,6 +32,7 @@ static const char *TAG = "display_service";
 #define DISPLAY_I2C_FREQ_HZ             400000
 #define DISPLAY_I2C_TIMEOUT_MS          1000
 #define DISPLAY_HOST_UART_PORT          UART_NUM_0
+#define DISPLAY_HOST_EVENT_TX_TIMEOUT   pdMS_TO_TICKS(20)
 #define DISPLAY_IO_EXPANDER_ADDR        0x24
 #define DISPLAY_BACKLIGHT_ADDR          0x38
 #define DISPLAY_BACKLIGHT_ENABLE_REG    0x01
@@ -638,8 +639,19 @@ static void display_service_send_host_event(const char *event_name)
     }
 
     size_t len = (size_t)((written < (int)sizeof(line)) ? written : ((int)sizeof(line) - 1));
-    (void)usb_serial_jtag_write_bytes(line, len, 0);
-    (void)uart_write_bytes(DISPLAY_HOST_UART_PORT, line, len);
+
+    /* Wait briefly instead of 0 ticks: with a zero timeout the event was
+     * silently dropped whenever the TX buffer was momentarily full (e.g. while
+     * log output was draining), and the RDK never saw the touch. */
+    if (usb_serial_jtag_is_driver_installed()) {
+        int sent = usb_serial_jtag_write_bytes(line, len, DISPLAY_HOST_EVENT_TX_TIMEOUT);
+        if (sent < (int)len) {
+            ESP_LOGW(TAG, "Host event %s truncated on USB (%d/%u bytes)", event_name, sent, (unsigned)len);
+        }
+    }
+    if (uart_is_driver_installed(DISPLAY_HOST_UART_PORT)) {
+        (void)uart_write_bytes(DISPLAY_HOST_UART_PORT, line, len);
+    }
 }
 
 static bool display_service_is_landing_sequence_active_locked(int64_t now)

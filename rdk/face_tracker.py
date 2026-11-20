@@ -46,6 +46,7 @@ CONFIG_DEFAULTS = {
 }
 
 FRAME_SLEEP_SECONDS = 0.03
+STALE_FRAMES_AFTER_PULSE = 2
 _CV2 = None
 
 
@@ -131,13 +132,13 @@ def build_parser(defaults: dict[str, object], config_path: Path) -> argparse.Arg
         "--dead-zone",
         type=float,
         default=defaults["dead_zone"],
-        help="No movement when |offset| <= dead_zone",
+        help="Stop an ongoing correction once |offset| <= dead_zone",
     )
     parser.add_argument(
         "--move-zone",
         type=float,
         default=defaults["move_zone"],
-        help="Only pulse when |offset| >= move_zone",
+        help="Start a correction once |offset| > move_zone",
     )
     parser.add_argument(
         "--lost-timeout",
@@ -247,6 +248,9 @@ def open_camera(camera_id: int, width: int, height: int) -> cv2.VideoCapture:
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
     cap.set(cv2.CAP_PROP_FPS, 30)
+    # Keep the driver queue short so decisions are made on fresh frames.
+    # Not every backend honours this, hence flush_stale_frames() after pulses.
+    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
     return cap
 
 
@@ -263,13 +267,29 @@ def choose_largest_face(faces):
     return max(faces, key=lambda item: item[2] * item[3])
 
 
-def offset_to_direction(offset: float, dead_zone: float, move_zone: float) -> str | None:
-    magnitude = abs(offset)
-    if magnitude <= dead_zone:
-        return None
-    if magnitude < move_zone:
+def offset_to_direction(
+    offset: float,
+    dead_zone: float,
+    move_zone: float,
+    correcting: bool = False,
+) -> str | None:
+    """Map a normalized face offset to a servo direction with hysteresis.
+
+    A correction only starts once the face drifts past ``move_zone``. Once a
+    correction is under way (``correcting``), it continues until the face is
+    back inside the tighter ``dead_zone``. This keeps the servo from stopping
+    right at the edge of the trigger threshold and twitching back and forth.
+    """
+    threshold = dead_zone if correcting else move_zone
+    if abs(offset) <= threshold:
         return None
     return "left" if offset < 0 else "right"
+
+
+def flush_stale_frames(cap, count: int = STALE_FRAMES_AFTER_PULSE) -> None:
+    """Drop frames that were buffered before/during a servo pulse."""
+    for _ in range(count):
+        cap.grab()
 
 
 def pulse_servo(
@@ -369,9 +389,10 @@ def main(argv: list[str] | None = None) -> int:
         last_pulse_time = 0.0
         last_saved_preview_time = 0.0
         frame_counter = 0
-        fps_window_start = time.time()
+        fps_window_start = time.monotonic()
         pending_direction = None
         pending_frames = 0
+        correcting = False
         save_preview_path = Path(args.save_preview_path).expanduser() if args.save_preview_path else None
 
         print("=" * 56)
@@ -409,7 +430,7 @@ def main(argv: list[str] | None = None) -> int:
 
             chosen_face = None
             offset = None
-            now = time.time()
+            now = time.monotonic()
 
             if len(faces) > 0:
                 chosen_face = choose_largest_face(faces)
@@ -419,10 +440,13 @@ def main(argv: list[str] | None = None) -> int:
                 offset = center_x - 0.5 - args.center_bias
                 last_face_time = now
 
-                direction = offset_to_direction(offset, args.dead_zone, args.move_zone)
+                direction = offset_to_direction(
+                    offset, args.dead_zone, args.move_zone, correcting
+                )
                 can_pulse = (now - last_pulse_time) >= args.pulse_cooldown
 
                 if direction is None:
+                    correcting = False
                     pending_direction = None
                     pending_frames = 0
                     if frame_counter % 15 == 0:
@@ -437,41 +461,23 @@ def main(argv: list[str] | None = None) -> int:
                         pending_direction = direction
                         pending_frames = 1
 
-                    if (
-                        pending_direction == "left"
-                        and can_pulse
-                        and pending_frames >= args.confirm_frames
-                    ):
-                        next_rotation = estimated_rotation - args.estimated_deg_per_pulse
+                    if can_pulse and pending_frames >= args.confirm_frames:
+                        sign = -1.0 if direction == "left" else 1.0
+                        pulse_us = args.left_us if direction == "left" else args.right_us
+                        next_rotation = estimated_rotation + sign * args.estimated_deg_per_pulse
                         if abs(next_rotation) <= args.max_rotation_deg:
-                            pulse_servo(pwm, args.left_us, args.stop_us, args.pulse_time)
+                            pulse_servo(pwm, pulse_us, args.stop_us, args.pulse_time)
+                            flush_stale_frames(cap)
                             estimated_rotation = next_rotation
-                            last_pulse_time = time.time()
+                            last_pulse_time = time.monotonic()
+                            correcting = True
                             print(
-                                f"[move] left offset={offset:+.3f} "
+                                f"[move] {direction} offset={offset:+.3f} "
                                 f"frames={pending_frames} rot~={estimated_rotation:+.1f}deg"
                             )
                         else:
-                            print("[limit] left pulse skipped at estimated rotation limit")
-                        pending_direction = None
-                        pending_frames = 0
-
-                    elif (
-                        pending_direction == "right"
-                        and can_pulse
-                        and pending_frames >= args.confirm_frames
-                    ):
-                        next_rotation = estimated_rotation + args.estimated_deg_per_pulse
-                        if abs(next_rotation) <= args.max_rotation_deg:
-                            pulse_servo(pwm, args.right_us, args.stop_us, args.pulse_time)
-                            estimated_rotation = next_rotation
-                            last_pulse_time = time.time()
-                            print(
-                                f"[move] right offset={offset:+.3f} "
-                                f"frames={pending_frames} rot~={estimated_rotation:+.1f}deg"
-                            )
-                        else:
-                            print("[limit] right pulse skipped at estimated rotation limit")
+                            correcting = False
+                            print(f"[limit] {direction} pulse skipped at estimated rotation limit")
                         pending_direction = None
                         pending_frames = 0
 
@@ -482,6 +488,7 @@ def main(argv: list[str] | None = None) -> int:
                         )
 
             else:
+                correcting = False
                 pending_direction = None
                 pending_frames = 0
                 if (now - last_face_time) > args.lost_timeout and frame_counter % 20 == 0:

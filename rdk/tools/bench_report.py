@@ -138,7 +138,7 @@ def analyse(name: str, events: list[tuple[float, str]]) -> Report:
             report.reconnect_times.append(ts - link_lost_at)
             link_lost_at = None
         elif msg.startswith("[touch-servo]"):
-            if "ignored" in msg:
+            if "ignored" in msg or "deferred" in msg:
                 report.touch_ignored += 1
             else:
                 report.touch_moves += 1

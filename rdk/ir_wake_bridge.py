@@ -662,7 +662,8 @@ class TouchServoController:
         self.center_event = center_event.strip().upper()
         self.verbose = verbose
         self.pwm: PwmChannel | None = None
-        self.is_down = False
+        self.is_down = False          # where the head physically is
+        self.target_down = False      # where the latest touch asked it to be
         self.last_move_time = 0.0
         self.started_at = 0.0
 
@@ -710,26 +711,42 @@ class TouchServoController:
         if self.verbose:
             print(f"[serial] <- {event_name}")
 
-        # Only flip is_down when the pulse really ran. Otherwise a pulse dropped
-        # by the cooldown would leave the head "down" in software but not in
-        # reality, and the next CENTER event would over-rotate it upward.
-        if (event_name == self.shy_event) and not self.is_down:
-            if self._pulse(self.down_direction, self.down_offset_us, self.down_pulse_time):
-                self.is_down = True
-                if self.verbose:
-                    print(f"[touch-servo] shy -> move {self.down_direction}")
-            elif self.verbose:
-                print("[touch-servo] shy ignored (cooldown)")
+        if event_name == self.shy_event:
+            self.target_down = True
+        elif event_name == self.center_event:
+            self.target_down = False
+        else:
             return
 
-        if (event_name == self.center_event) and self.is_down:
-            up_direction = "left" if self.down_direction == "right" else "right"
-            if self._pulse(up_direction, self.up_offset_us, self.up_pulse_time):
-                self.is_down = False
-                if self.verbose:
-                    print(f"[touch-servo] center -> move {up_direction}")
-            elif self.verbose:
-                print("[touch-servo] center ignored (cooldown)")
+        if not self.tick() and self.target_down != self.is_down and self.verbose:
+            print(f"[touch-servo] {event_name.lower()} deferred (cooldown)")
+
+    def tick(self) -> bool:
+        """Move the head toward the latest requested position. Call every loop.
+
+        Taps that arrive during the cooldown are not dropped: only the most
+        recent request is kept and applied as soon as the cooldown expires.
+        is_down only changes when a pulse really ran, so the software state
+        always matches the physical head. Returns True if a pulse ran.
+        """
+        if not self.enabled or self.target_down == self.is_down:
+            return False
+
+        if self.target_down:
+            if not self._pulse(self.down_direction, self.down_offset_us, self.down_pulse_time):
+                return False
+            self.is_down = True
+            if self.verbose:
+                print(f"[touch-servo] shy -> move {self.down_direction}")
+            return True
+
+        up_direction = "left" if self.down_direction == "right" else "right"
+        if not self._pulse(up_direction, self.up_offset_us, self.up_pulse_time):
+            return False
+        self.is_down = False
+        if self.verbose:
+            print(f"[touch-servo] center -> move {up_direction}")
+        return True
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -820,6 +837,7 @@ def main(argv: list[str] | None = None) -> int:
         while running:
             for line in bridge.read_lines():
                 touch_servo.handle_line(line)
+            touch_servo.tick()
 
             now = time.monotonic()
             if (

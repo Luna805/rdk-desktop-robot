@@ -95,11 +95,30 @@ class TouchServoTest(unittest.TestCase):
 
     def test_pulse_skipped_by_cooldown_does_not_flip_state(self):
         # Regression: is_down used to flip even when the pulse was skipped,
-        # so the next CENTER would rotate the head up past neutral.
+        # so the next CENTER would rotate the head past neutral.
         servo = make_touch_servo(cooldown=10.0)
         servo.handle_line("EVT:TOUCH_SHY")       # moves down
-        servo.handle_line("EVT:TOUCH_CENTER")    # inside cooldown -> skipped
+        servo.handle_line("EVT:TOUCH_CENTER")    # inside cooldown -> deferred
         self.assertTrue(servo.is_down, "state must still say 'down'")
+        self.assertEqual(len(servo.pwm.pulses), 1)
+
+    def test_deferred_tap_is_applied_after_cooldown(self):
+        servo = make_touch_servo(cooldown=10.0)
+        servo.handle_line("EVT:TOUCH_SHY")
+        servo.handle_line("EVT:TOUCH_CENTER")
+        self.assertFalse(servo.tick(), "still cooling down")
+        servo.last_move_time -= 20.0             # cooldown has passed
+        self.assertTrue(servo.tick())
+        self.assertFalse(servo.is_down)
+        self.assertEqual(servo.pwm.pulses, [1440, 1550])
+
+    def test_only_latest_request_is_kept(self):
+        servo = make_touch_servo(cooldown=10.0)
+        servo.handle_line("EVT:TOUCH_SHY")       # down
+        for event in ["EVT:TOUCH_CENTER", "EVT:TOUCH_SHY"] * 3:
+            servo.handle_line(event)             # all inside cooldown, net: stay down
+        servo.last_move_time -= 20.0
+        self.assertFalse(servo.tick(), "latest request equals current position")
         self.assertEqual(len(servo.pwm.pulses), 1)
 
     def test_ignores_non_event_lines(self):

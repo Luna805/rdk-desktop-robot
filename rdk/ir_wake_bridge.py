@@ -383,7 +383,13 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
 
 def resolve_serial_port(serial_port: str, candidate_patterns: list[str]) -> str:
-    if serial_port:
+    """Pick the ESP serial device.
+
+    The configured port wins while it exists. USB CDC devices are frequently
+    re-enumerated under a new name (ttyACM0 -> ttyACM1) after a reconnect, so
+    when the configured port is missing we fall back to the candidate globs.
+    """
+    if serial_port and os.path.exists(serial_port):
         return serial_port
 
     resolved: list[str] = []
@@ -395,18 +401,69 @@ def resolve_serial_port(serial_port: str, candidate_patterns: list[str]) -> str:
             "Could not find an ESP serial port. Connect the ESP board and check /dev/ttyACM* or /dev/ttyUSB*."
         )
 
+    if serial_port:
+        print(f"[serial] configured port {serial_port} not found, using {resolved[0]}")
     return resolved[0]
 
 
+class Debouncer:
+    """Report a level change only after ``confirm_reads`` consecutive samples."""
+
+    def __init__(self, confirm_reads: int, initial: bool = False):
+        self.confirm_reads = max(1, confirm_reads)
+        self.state = initial
+        self._candidate_reads = 0
+
+    def reset(self) -> None:
+        self._candidate_reads = 0
+
+    def update(self, sample: bool) -> bool:
+        """Feed one raw sample. Returns True when the stable state just changed."""
+        if sample == self.state:
+            self._candidate_reads = 0
+            return False
+
+        self._candidate_reads += 1
+        if self._candidate_reads < self.confirm_reads:
+            return False
+
+        self.state = sample
+        self._candidate_reads = 0
+        return True
+
+
 class EspSerialBridge:
-    def __init__(self, port: str, baudrate: int, timeout: float, dry_run: bool, verbose: bool):
+    """Line-based serial link to the ESP display that survives USB re-enumeration.
+
+    I/O errors never propagate to the caller. The port is closed, reopened on a
+    timer (re-resolving the device name each time), and the last state command
+    is replayed so the display catches up with what it missed.
+    """
+
+    RECONNECT_INTERVAL = 1.0
+    MAX_RX_BUFFER = 4096
+
+    def __init__(
+        self,
+        port: str,
+        baudrate: int,
+        timeout: float,
+        dry_run: bool,
+        verbose: bool,
+        candidates: list[str] | None = None,
+    ):
         self.port = port
+        self.configured_port = port
+        self.candidates = list(candidates or [])
         self.baudrate = baudrate
         self.timeout = timeout
         self.dry_run = dry_run
         self.verbose = verbose
         self.serial_handle = None
         self.rx_buffer = ""
+        self.last_command: str | None = None
+        self._pending_replay = False
+        self._next_retry_time = 0.0
 
     def open(self) -> None:
         if self.dry_run:
@@ -416,6 +473,7 @@ class EspSerialBridge:
         handle.port = self.port
         handle.baudrate = self.baudrate
         handle.timeout = self.timeout
+        handle.write_timeout = self.timeout
         handle.rtscts = False
         handle.dsrdtr = False
         handle.exclusive = False
@@ -436,42 +494,104 @@ class EspSerialBridge:
 
     def close(self) -> None:
         if self.serial_handle is not None:
-            self.serial_handle.close()
+            try:
+                self.serial_handle.close()
+            except Exception:
+                pass
             self.serial_handle = None
 
-    def send(self, command: str) -> None:
-        payload = f"{command}\n"
+    def _handle_io_error(self, exc: Exception) -> None:
+        print(f"[serial] link lost on {self.port}: {exc}", file=sys.stderr)
+        self.close()
+        self.rx_buffer = ""
+        self._pending_replay = self.last_command is not None
+        self._next_retry_time = time.monotonic() + self.RECONNECT_INTERVAL
+
+    def _ensure_open(self) -> bool:
+        if self.serial_handle is not None:
+            return True
+
+        now = time.monotonic()
+        if now < self._next_retry_time:
+            return False
+
+        try:
+            self.port = resolve_serial_port(self.configured_port, self.candidates)
+            self.open()
+        except Exception as exc:
+            self.close()
+            self._next_retry_time = now + self.RECONNECT_INTERVAL
+            if self.verbose:
+                print(f"[serial] reconnect failed: {exc}")
+            return False
+
+        print(f"[serial] connected on {self.port}")
+        if self._pending_replay and self.last_command is not None:
+            self._pending_replay = False
+            self._write(self.last_command, replay=True)
+        return self.serial_handle is not None
+
+    def _write(self, command: str, replay: bool = False) -> bool:
+        assert self.serial_handle is not None
+        try:
+            self.serial_handle.write(f"{command}\n".encode("utf-8"))
+            self.serial_handle.flush()
+        except Exception as exc:
+            self._handle_io_error(exc)
+            return False
         if self.verbose:
-            print(f"[serial] -> {command}")
+            print(f"[serial] -> {command}{' (replay)' if replay else ''}")
+        return True
+
+    def send(self, command: str) -> bool:
+        """Send a state command. Returns False if it had to be deferred.
+
+        Only the latest state matters to the display, so while offline we keep
+        just ``last_command`` and replay it once the link is back.
+        """
+        self.last_command = command
 
         if self.dry_run:
-            return
+            if self.verbose:
+                print(f"[serial] -> {command}")
+            return True
 
         if self.serial_handle is None:
-            self.open()
-        assert self.serial_handle is not None
-        self.serial_handle.write(payload.encode("utf-8"))
-        self.serial_handle.flush()
+            # Reconnecting replays last_command, which is this command.
+            self._pending_replay = True
+            if not self._ensure_open():
+                if self.verbose:
+                    print(f"[serial] offline, will send '{command}' after reconnect")
+                return False
+            return self.serial_handle is not None
+
+        return self._write(command)
 
     def read_lines(self) -> list[str]:
         if self.dry_run:
             return []
 
-        if self.serial_handle is None:
-            self.open()
+        if not self._ensure_open():
+            return []
         assert self.serial_handle is not None
 
-        waiting = getattr(self.serial_handle, "in_waiting", 0)
-        if waiting <= 0:
+        try:
+            waiting = getattr(self.serial_handle, "in_waiting", 0)
+            if waiting <= 0:
+                return []
+            data = self.serial_handle.read(waiting)
+        except Exception as exc:
+            self._handle_io_error(exc)
             return []
 
-        data = self.serial_handle.read(waiting)
         if not data:
             return []
 
         self.rx_buffer += data.decode("utf-8", errors="ignore")
         lines = self.rx_buffer.split("\n")
         self.rx_buffer = lines.pop()
+        if len(self.rx_buffer) > self.MAX_RX_BUFFER:
+            self.rx_buffer = ""
 
         parsed: list[str] = []
         for line in lines:
@@ -552,30 +672,34 @@ class TouchServoController:
         self.pwm = PwmChannel(self.pin)
         self.pwm.initialize(self.stop_us)
         self.pwm.stop(self.stop_us)
-        self.started_at = time.time()
+        self.started_at = time.monotonic()
 
     def cleanup(self) -> None:
         if self.pwm is not None:
             self.pwm.stop(self.stop_us)
 
-    def _pulse(self, direction: str, offset_us: int, pulse_time: float) -> None:
+    def _pulse(self, direction: str, offset_us: int, pulse_time: float) -> bool:
+        """Run one servo pulse. Returns False if it was skipped (no PWM or cooldown)."""
         if self.pwm is None:
-            return
-        now = time.time()
-        if (now - self.last_move_time) < self.cooldown:
-            return
+            return False
+        now = time.monotonic()
+        if self.last_move_time > 0 and (now - self.last_move_time) < self.cooldown:
+            return False
 
         pulse_us = direction_to_pulse(self.stop_us, direction, offset_us, self.reverse)
-        self.pwm.set_pulse_us(pulse_us)
-        time.sleep(pulse_time)
-        self.pwm.stop(self.stop_us)
-        self.last_move_time = time.time()
+        try:
+            self.pwm.set_pulse_us(pulse_us)
+            time.sleep(pulse_time)
+        finally:
+            self.pwm.stop(self.stop_us)
+        self.last_move_time = time.monotonic()
+        return True
 
     def handle_line(self, line: str) -> None:
         if not self.enabled:
             return
 
-        if (time.time() - self.started_at) < self.ignore_startup_seconds:
+        if (time.monotonic() - self.started_at) < self.ignore_startup_seconds:
             return
 
         event = line.strip()
@@ -586,19 +710,26 @@ class TouchServoController:
         if self.verbose:
             print(f"[serial] <- {event_name}")
 
+        # Only flip is_down when the pulse really ran. Otherwise a pulse dropped
+        # by the cooldown would leave the head "down" in software but not in
+        # reality, and the next CENTER event would over-rotate it upward.
         if (event_name == self.shy_event) and not self.is_down:
-            self._pulse(self.down_direction, self.down_offset_us, self.down_pulse_time)
-            self.is_down = True
-            if self.verbose:
-                print(f"[touch-servo] shy -> move {self.down_direction}")
+            if self._pulse(self.down_direction, self.down_offset_us, self.down_pulse_time):
+                self.is_down = True
+                if self.verbose:
+                    print(f"[touch-servo] shy -> move {self.down_direction}")
+            elif self.verbose:
+                print("[touch-servo] shy ignored (cooldown)")
             return
 
         if (event_name == self.center_event) and self.is_down:
             up_direction = "left" if self.down_direction == "right" else "right"
-            self._pulse(up_direction, self.up_offset_us, self.up_pulse_time)
-            self.is_down = False
-            if self.verbose:
-                print(f"[touch-servo] center -> move {up_direction}")
+            if self._pulse(up_direction, self.up_offset_us, self.up_pulse_time):
+                self.is_down = False
+                if self.verbose:
+                    print(f"[touch-servo] center -> move {up_direction}")
+            elif self.verbose:
+                print("[touch-servo] center ignored (cooldown)")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -608,12 +739,7 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(effective_config(args), indent=2, sort_keys=True))
         return 0
 
-    serial_port = "(disabled)"
-    if not args.skip_serial:
-        serial_port = resolve_serial_port(
-            args.serial_port,
-            args.serial_candidates,
-        )
+    serial_port = "(disabled)" if args.skip_serial else (args.serial_port or "(auto)")
 
     running = True
 
@@ -630,6 +756,7 @@ def main(argv: list[str] | None = None) -> int:
         timeout=args.serial_timeout,
         dry_run=args.dry_run or args.skip_serial,
         verbose=args.verbose,
+        candidates=args.serial_candidates,
     )
     sensor = InfraredSensor(
         gpio_pin=args.gpio_pin,
@@ -653,16 +780,14 @@ def main(argv: list[str] | None = None) -> int:
         verbose=args.verbose,
     )
 
-    blocked_state = False
-    blocked_reads = 0
-    clear_reads = 0
+    debouncer = Debouncer(args.confirm_reads)
     awake = False
     last_trigger_time = 0.0
     sensor_suppressed = False
 
     try:
-        if not args.skip_serial:
-            bridge.open()
+        # The bridge connects lazily and keeps retrying, so a missing or
+        # re-enumerated ESP port no longer aborts the whole service.
         sensor.setup()
 
         print("=" * 56)
@@ -696,14 +821,15 @@ def main(argv: list[str] | None = None) -> int:
             for line in bridge.read_lines():
                 touch_servo.handle_line(line)
 
-            now = time.time()
+            now = time.monotonic()
             if (
                 touch_servo.enabled
                 and touch_servo.last_move_time > 0
                 and (now - touch_servo.last_move_time) < args.sensor_ignore_after_touch_servo_seconds
             ):
-                blocked_reads = 0
-                clear_reads = 0
+                # The servo motor injects noise on the IR line; discard samples
+                # until it settles, but keep the robot awake meanwhile.
+                debouncer.reset()
                 if awake:
                     last_trigger_time = now
                 if args.verbose and not sensor_suppressed:
@@ -717,30 +843,19 @@ def main(argv: list[str] | None = None) -> int:
 
             sensor_suppressed = False
             raw_level = sensor.read()
-            is_blocked = raw_level == args.trigger_level
+            changed = debouncer.update(raw_level == args.trigger_level)
 
-            if is_blocked:
-                blocked_reads += 1
-                clear_reads = 0
-            else:
-                clear_reads += 1
-                blocked_reads = 0
-
-            if is_blocked and not blocked_state and blocked_reads >= args.confirm_reads:
-                blocked_state = True
+            if changed and debouncer.state:
                 last_trigger_time = now
                 if not awake:
                     bridge.send(args.wake_command)
                     awake = True
                 if args.verbose:
                     print(f"[sensor] blocked raw={raw_level} -> awake")
+            elif changed and args.verbose:
+                print(f"[sensor] cleared raw={raw_level}")
 
-            elif not is_blocked and blocked_state and clear_reads >= args.confirm_reads:
-                blocked_state = False
-                if args.verbose:
-                    print(f"[sensor] cleared raw={raw_level}")
-
-            if blocked_state:
+            if debouncer.state:
                 last_trigger_time = now
 
             if awake and (now - last_trigger_time) >= args.sleep_timeout:
